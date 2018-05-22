@@ -1,0 +1,1524 @@
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: helm-toolkit
+data:
+  chart_name: helm-toolkit
+  release: helm-toolkit
+  namespace: helm-toolkit
+  timeout: 300
+  values: {}
+  source:
+    type: local
+    location: ${OSH_INFRA_PATH}
+    subpath: helm-toolkit
+    reference: master
+  dependencies: []
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: openstack-ingress-controller
+data:
+  chart_name: openstack-ingress-controller
+  release: openstack-ingress-controller
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+  values:
+    labels:
+      server:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      error_server:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+    pod:
+      replicas:
+        error_page: 2
+        ingress: 2
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: ingress
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: openstack-ceph-config
+data:
+  chart_name: openstack-ceph-config
+  release: openstack-ceph-config
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+    pre:
+      delete:
+        - type: job
+          labels:
+            application: ceph
+            component: client-key-generator
+        - type: job
+          labels:
+            application: ceph
+            component: client-key-cleaner
+  values:
+    labels:
+      jobs:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+    endpoints:
+      identity:
+        namespace: openstack
+      object_store:
+        namespace: ceph
+      ceph_mon:
+        namespace: ceph
+    network:
+      public: ${CEPH_NETWORK}
+      cluster: ${CEPH_NETWORK}
+    deployment:
+      storage_secrets: false
+      ceph: false
+      rbd_provisioner: false
+      cephfs_provisioner: false
+      client_secrets: true
+      rgw_keystone_user_and_endpoints: false
+    bootstrap:
+      enabled: false
+    conf:
+      rgw_ks:
+        enabled: true
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: ceph-client
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: mariadb
+data:
+  chart_name: mariadb
+  release: mariadb
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+  values:
+    volume:
+      enabled: false
+    endpoints:
+      oslo_db:
+        auth:
+          admin:
+            password: ${DB_ADMIN_PASSWORD}
+    monitoring:
+      prometheus:
+        enabled: true
+    labels:
+      server:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      prometheus_mysql_exporter:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: mariadb
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: memcached
+data:
+  chart_name: memcached
+  release: memcached
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+  values:
+    labels:
+      server:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: memcached
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: keystone-rabbitmq
+data:
+  chart_name: keystone-rabbitmq
+  release: keystone-rabbitmq
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+  values:
+    endpoints:
+      oslo_messaging:
+        auth:
+          user:
+            username: keystone-rabbitmq-admin
+            password: ${KEYSTONE_RABBITMQ_ADMIN_PASSWORD}
+        hosts:
+          default: keystone-rabbitmq
+      prometheus_rabbitmq_exporter:
+        hosts:
+          default: keystone-rabbitmq-exporter
+    monitoring:
+      prometheus:
+        enabled: true
+    labels:
+      server:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      prometheus_rabbitmq_exporter:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: rabbitmq
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: keystone
+data:
+  chart_name: keystone
+  release: keystone
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+    pre:
+      delete:
+        - type: job
+          labels:
+            application: keystone
+            component: bootstrap
+        - type: job
+          labels:
+            application: keystone
+            component: credential-setup
+        - type: job
+          labels:
+            application: keystone
+            component: db-init
+        - type: job
+          labels:
+            application: keystone
+            component: db-sync
+        - type: job
+          labels:
+            application: keystone
+            component: fernet-setup
+        - type: job
+          labels:
+            application: keystone
+            component: domain-manage
+  values:
+    endpoints:
+      identity:
+        name: keystone
+        namespace: openstack
+        auth:
+          admin:
+            password: ${KEYSTONE_ADMIN_PASSWORD}
+      oslo_cache:
+        auth:
+          memcache_secret_key: ${KEYSTONE_AUTHTOKEN_MEMCACHED_SECRET_KEY}
+      oslo_db:
+        auth:
+          admin:
+            password: ${DB_ADMIN_PASSWORD}
+          keystone:
+            password: ${KEYSTONE_DB_PASSWORD}
+      oslo_messaging:
+        auth:
+          admin:
+            username: keystone-rabbitmq-admin
+            password: ${KEYSTONE_RABBITMQ_ADMIN_PASSWORD}
+          keystone:
+            username: keystone-rabbitmq-user
+            password: ${KEYSTONE_RABBITMQ_USER_PASSWORD}
+        hosts:
+         default: keystone-rabbitmq
+    labels:
+      api:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      job:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+    pod:
+      replicas:
+        api: 2
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: keystone
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: radosgw-openstack
+data:
+  chart_name: radosgw-openstack
+  release: radosgw-openstack
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+    pre:
+      delete:
+        - type: job
+          labels:
+            application: ceph
+            component: ks-user
+        - type: job
+          labels:
+            application: ceph
+            component: ks-service
+        - type: job
+          labels:
+            application: ceph
+            component: ks-endpoints
+  values:
+    endpoints:
+      identity:
+        namespace: openstack
+        auth:
+          admin:
+            password: ${KEYSTONE_ADMIN_PASSWORD}
+          swift:
+            password: ${SWIFT_USER_PASSWORD}
+          object_store:
+            namespace: ceph
+          ceph_mon:
+            namespace: ceph
+      object_store:
+        namespace: ceph
+      ceph_mon:
+        namespace: ceph
+    labels:
+      job:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+    bootstrap:
+      enabled: false
+    conf:
+      rgw_ks:
+        enabled: true
+    network:
+      public: ${CEPH_NETWORK}
+      cluster: ${CEPH_NETWORK}
+    deployment:
+      storage_secrets: false
+      ceph: false
+      rbd_provisioner: false
+      cephfs_provisioner: false
+      client_secrets: false
+      rgw_keystone_user_and_endpoints: true
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: ceph-client
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: glance-rabbitmq
+data:
+  chart_name: glance-rabbitmq
+  release: glance-rabbitmq
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+  values:
+    endpoints:
+      oslo_messaging:
+        auth:
+          user:
+            username: glance-rabbitmq-admin
+            password: ${GLANCE_RABBITMQ_ADMIN_PASSWORD}
+        hosts:
+          default: glance-rabbitmq
+      prometheus_rabbitmq_exporter:
+        hosts:
+          default: glance-rabbitmq-exporter
+    monitoring:
+      prometheus:
+        enabled: true
+    labels:
+      server:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      prometheus_rabbitmq_exporter:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: rabbitmq
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: glance
+data:
+  chart_name: glance
+  release: glance
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+    pre:
+      delete:
+        - type: job
+          labels:
+            application: glance
+            component: db-init
+        - type: job
+          labels:
+            application: glance
+            component: db-sync
+        - type: job
+          labels:
+            application: glance
+            component: ks-user
+        - type: job
+          labels:
+            application: glance
+            component: ks-service
+        - type: job
+          labels:
+            application: glance
+            component: ks-endpoints
+        - type: job
+          labels:
+            application: glance
+            component: storage-init
+  values:
+    endpoints:
+      identity:
+        auth:
+          admin:
+            password: ${KEYSTONE_ADMIN_PASSWORD}
+          glance:
+            password: ${GLANCE_USER_PASSWORD}
+      oslo_db:
+        auth:
+          admin:
+            password: ${DB_ADMIN_PASSWORD}
+          glance:
+            password: ${GLANCE_DB_PASSWORD}
+      oslo_cache:
+        auth:
+          memcache_secret_key: ${KEYSTONE_AUTHTOKEN_MEMCACHED_SECRET_KEY}
+      oslo_messaging:
+        auth:
+          admin:
+            username: glance-rabbitmq-admin
+            password: ${GLANCE_RABBITMQ_ADMIN_PASSWORD}
+          glance:
+            username: glance-rabbitmq-user
+            password: ${GLANCE_RABBITMQ_USER_PASSWORD}
+        hosts:
+          default: glance-rabbitmq
+    labels:
+      api:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      job:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      registry:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+    pod:
+      replicas:
+        api: 2
+        registry: 2
+    storage: radosgw
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: glance
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: cinder-rabbitmq
+data:
+  chart_name: cinder-rabbitmq
+  release: cinder-rabbitmq
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+  values:
+    endpoints:
+      oslo_messaging:
+        auth:
+          user:
+            username: cinder-rabbitmq-admin
+            password: ${CINDER_RABBITMQ_ADMIN_PASSWORD}
+        hosts:
+          default: cinder-rabbitmq
+      prometheus_rabbitmq_exporter:
+        hosts:
+          default: cinder-rabbitmq-exporter
+    monitoring:
+      prometheus:
+        enabled: true
+    labels:
+      server:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      prometheus_rabbitmq_exporter:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: rabbitmq
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: cinder
+data:
+  chart_name: cinder
+  release: cinder
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+    pre:
+      delete:
+        - type: job
+          labels:
+            application: cinder
+            component: db-init
+        - type: job
+          labels:
+            application: cinder
+            component: db-sync
+        - type: job
+          labels:
+            application: cinder
+            component: ks-user
+        - type: job
+          labels:
+            application: cinder
+            component: ks-service
+        - type: job
+          labels:
+            application: cinder
+            component: ks-endpoints
+        - type: job
+          labels:
+            application: cinder
+            component: storage-init
+  values:
+    endpoints:
+      identity:
+        auth:
+          admin:
+            password: ${KEYSTONE_ADMIN_PASSWORD}
+          cinder:
+            password: ${CINDER_USER_PASSWORD}
+      oslo_db:
+        auth:
+          admin:
+            password: ${DB_ADMIN_PASSWORD}
+          cinder:
+            password: ${CINDER_DB_PASSWORD}
+      oslo_cache:
+        auth:
+          memcache_secret_key: ${KEYSTONE_AUTHTOKEN_MEMCACHED_SECRET_KEY}
+      oslo_messaging:
+        auth:
+          admin:
+            username: cinder-rabbitmq-admin
+            password: ${CINDER_RABBITMQ_ADMIN_PASSWORD}
+          cinder:
+            username: cinder-rabbitmq-user
+            password: ${CINDER_RABBITMQ_USER_PASSWORD}
+        hosts:
+          default: cinder-rabbitmq
+    labels:
+      api:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      backup:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      job:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      scheduler:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      volume:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+    pod:
+      replicas:
+        api: 2
+        volume: 1
+        scheduler: 1
+        backup: 1
+    conf:
+      cinder:
+        DEFAULT:
+          backup_driver: cinder.backup.drivers.swift
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: cinder
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: openvswitch
+data:
+  chart_name: openvswitch
+  release: openvswitch
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+  values:
+    labels:
+      ovs:
+        node_selector_key: openvswitch
+        node_selector_value: enabled
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: openvswitch
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: libvirt
+data:
+  chart_name: libvirt
+  release: libvirt
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+  values:
+    labels:
+      agent:
+        libvirt:
+          node_selector_key: openstack-compute-node
+          node_selector_value: enabled
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: libvirt
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: nova-rabbitmq
+data:
+  chart_name: nova-rabbitmq
+  release: nova-rabbitmq
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+  values:
+    endpoints:
+      oslo_messaging:
+        auth:
+          user:
+            username: nova-rabbitmq-admin
+            password: ${NOVA_RABBITMQ_ADMIN_PASSWORD}
+        hosts:
+          default: nova-rabbitmq
+      prometheus_rabbitmq_exporter:
+        hosts:
+          default: nova-rabbitmq-exporter
+    monitoring:
+      prometheus:
+        enabled: true
+    labels:
+      server:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      prometheus_rabbitmq_exporter:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: rabbitmq
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: nova
+data:
+  chart_name: nova
+  release: nova
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+    pre:
+      delete:
+        - type: job
+          labels:
+            application: nova
+            component: db-init
+        - type: job
+          labels:
+            application: nova
+            component: db-sync
+        - type: job
+          labels:
+            application: nova
+            component: ks-user
+        - type: job
+          labels:
+            application: nova
+            component: ks-service
+        - type: job
+          labels:
+            application: nova
+            component: ks-endpoints
+        - type: job
+          labels:
+            application: placement
+            component: ks-user
+        - type: job
+          labels:
+            application: placement
+            component: ks-service
+        - type: job
+          labels:
+            application: placement
+            component: ks-endpoints
+        - type: job
+          labels:
+            application: nova
+            component: cell-setup
+  values:
+    endpoints:
+      identity:
+        name: keystone
+        auth:
+          admin:
+            password: ${KEYSTONE_ADMIN_PASSWORD}
+          nova:
+            password: ${NOVA_USER_PASSWORD}
+          neutron:
+            password: ${NEUTRON_USER_PASSWORD}
+          placement:
+            password: ${NOVA_PLACEMENT_USER_PASSWORD}
+      oslo_db:
+        auth:
+          admin:
+            password: ${DB_ADMIN_PASSWORD}
+          nova:
+            password: ${NOVA_DB_PASSWORD}
+      oslo_db_api:
+        auth:
+          admin:
+            password: ${DB_ADMIN_PASSWORD}
+          nova:
+            password: ${NOVA_DB_PASSWORD}
+      oslo_db_cell0:
+        auth:
+          admin:
+            password: ${DB_ADMIN_PASSWORD}
+          nova:
+            password: ${NOVA_DB_PASSWORD}
+      oslo_cache:
+        auth:
+          memcache_secret_key: ${KEYSTONE_AUTHTOKEN_MEMCACHED_SECRET_KEY}
+      oslo_messaging:
+        auth:
+          admin:
+            username: nova-rabbitmq-admin
+            password: ${NOVA_RABBITMQ_ADMIN_PASSWORD}
+          nova:
+            username: nova-rabbitmq-user
+            password: ${NOVA_RABBITMQ_USER_PASSWORD}
+        hosts:
+          default: nova-rabbitmq
+    labels:
+      agent:
+        compute:
+          node_selector_key: openstack-compute-node
+          node_selector_value: enabled
+        compute_ironic:
+          node_selector_key: openstack-compute-node
+          node_selector_value: enabled
+      api_metadata:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      conductor:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      consoleauth:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      job:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      novncproxy:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      osapi:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      placement:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      scheduler:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      spiceproxy:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      test:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+    pod:
+      replicas:
+        api_metadata: 1
+        placement: 2
+        osapi: 2
+        conductor: 2
+        consoleauth: 2
+        scheduler: 2
+        novncproxy: 1
+    conf:
+      nova:
+        libvirt:
+          virt_type: qemu
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: nova
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: neutron-rabbitmq
+data:
+  chart_name: neutron-rabbitmq
+  release: neutron-rabbitmq
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+  values:
+    endpoints:
+      oslo_messaging:
+        auth:
+          user:
+            username: neutron-rabbitmq-admin
+            password: ${NEUTRON_RABBITMQ_ADMIN_PASSWORD}
+        hosts:
+          default: neutron-rabbitmq
+      prometheus_rabbitmq_exporter:
+        hosts:
+          default: neutron-rabbitmq-exporter
+    monitoring:
+      prometheus:
+        enabled: true
+    labels:
+      server:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      prometheus_rabbitmq_exporter:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: rabbitmq
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: neutron
+data:
+  chart_name: neutron
+  release: neutron
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+    pre:
+      delete:
+        - type: job
+          labels:
+            application: neutron
+            component: db-init
+        - type: job
+          labels:
+            application: neutron
+            component: db-sync
+        - type: job
+          labels:
+            application: neutron
+            component: ks-user
+        - type: job
+          labels:
+            application: neutron
+            component: ks-service
+        - type: job
+          labels:
+            application: neutron
+            component: ks-endpoints
+  values:
+    endpoints:
+      identity:
+        auth:
+          admin:
+            password: ${KEYSTONE_ADMIN_PASSWORD}
+          neutron:
+            password: ${NEUTRON_USER_PASSWORD}
+          nova:
+            password: ${NOVA_USER_PASSWORD}
+      oslo_db:
+        auth:
+          admin:
+            password: ${DB_ADMIN_PASSWORD}
+          neutron:
+            password: ${NEUTRON_DB_PASSWORD}
+      oslo_cache:
+        auth:
+          memcache_secret_key: ${KEYSTONE_AUTHTOKEN_MEMCACHED_SECRET_KEY}
+      oslo_messaging:
+        auth:
+          admin:
+            username: neutron-rabbitmq-admin
+            password: ${NEUTRON_RABBITMQ_ADMIN_PASSWORD}
+          neutron:
+            username: neutron-rabbitmq-user
+            password: ${NEUTRON_RABBITMQ_USER_PASSWORD}
+        hosts:
+          default: neutron-rabbitmq
+    pod:
+      replicas:
+        server: 2
+    labels:
+      agent:
+        dhcp:
+          node_selector_key: openstack-control-plane
+          node_selector_value: enabled
+        l3:
+          node_selector_key: openstack-control-plane
+          node_selector_value: enabled
+        metadata:
+          node_selector_key: openstack-control-plane
+          node_selector_value: enabled
+      job:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      lb:
+        node_selector_key: linuxbridge
+        node_selector_value: enabled
+      # ovs is a special case, requiring a special
+      # label that can apply to both control hosts
+      # and compute hosts, until we get more sophisticated
+      # with our daemonset scheduling
+      ovs:
+        node_selector_key: openvswitch
+        node_selector_value: enabled
+      server:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      test:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+    network:
+      interface:
+        tunnel: ${TUNNEL_DEVICE}
+    conf:
+      neutron:
+        DEFAULT:
+          l3_ha: True
+          min_l3_agents_per_router: 2
+          max_l3_agents_per_router: 5
+          l3_ha_network_type: vxlan
+          dhcp_agents_per_network: 2
+      plugins:
+        ml2_conf:
+          ml2_type_flat:
+            flat_networks: public
+        openvswitch_agent:
+          agent:
+            tunnel_types: vxlan
+          ovs:
+            bridge_mappings: public:br-ex
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: neutron
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: heat-rabbitmq
+data:
+  chart_name: heat-rabbitmq
+  release: heat-rabbitmq
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+  values:
+    endpoints:
+      oslo_messaging:
+        auth:
+          user:
+            username: heat-rabbitmq-admin
+            password: ${HEAT_RABBITMQ_ADMIN_PASSWORD}
+        hosts:
+          default: heat-rabbitmq
+      prometheus_rabbitmq_exporter:
+        hosts:
+          default: heat-rabbitmq-exporter
+    monitoring:
+      prometheus:
+        enabled: true
+    labels:
+      server:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      prometheus_rabbitmq_exporter:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: rabbitmq
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: heat
+data:
+  chart_name: heat
+  release: heat
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+    pre:
+      delete:
+        - type: job
+          labels:
+            application: heat
+            component: db-init
+        - type: job
+          labels:
+            application: heat
+            component: db-sync
+        - type: job
+          labels:
+            application: heat
+            component: ks-user
+        - type: job
+          labels:
+            application: heat
+            component: ks-service
+        - type: job
+          labels:
+            application: heat
+            component: ks-endpoints
+  values:
+    endpoints:
+      identity:
+        auth:
+          admin:
+            password: ${KEYSTONE_ADMIN_PASSWORD}
+          heat:
+            password: ${HEAT_USER_PASSWORD}
+          heat_trustee:
+            password: ${HEAT_TRUSTEE_PASSWORD}
+          heat_stack_user:
+            password: ${HEAT_STACK_PASSWORD}
+      oslo_db:
+        auth:
+          admin:
+            password: ${DB_ADMIN_PASSWORD}
+          heat:
+            password: ${HEAT_DB_PASSWORD}
+      oslo_cache:
+        hosts:
+          default: heat-memcached
+      oslo_messaging:
+        auth:
+          admin:
+            username: heat-rabbitmq-admin
+            password: ${HEAT_RABBITMQ_ADMIN_PASSWORD}
+          heat:
+            username: heat-rabbitmq-user
+            password: ${HEAT_RABBITMQ_USER_PASSWORD}
+        hosts:
+          default: heat-rabbitmq
+    labels:
+      api:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      cfn:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      cloudwatch:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      engine:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      job:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+    pod:
+      replicas:
+        api: 2
+        cfn: 2
+        cloudwatch: 2
+        engine: 2
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: heat
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: barbican-rabbitmq
+data:
+  chart_name: barbican-rabbitmq
+  release: barbican-rabbitmq
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+  values:
+    endpoints:
+      oslo_messaging:
+        auth:
+          user:
+            username: barbican-rabbitmq-admin
+            password: ${BARBICAN_RABBITMQ_ADMIN_PASSWORD}
+        hosts:
+          default: barbican-rabbitmq
+      prometheus_rabbitmq_exporter:
+        hosts:
+          default: barbican-rabbitmq-exporter
+    monitoring:
+      prometheus:
+        enabled: true
+    labels:
+      server:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      prometheus_rabbitmq_exporter:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: rabbitmq
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: barbican
+data:
+  chart_name: barbican
+  release: barbican
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+    pre:
+      delete:
+        - type: job
+          labels:
+            application: barbican
+            component: db-init
+        - type: job
+          labels:
+            application: barbican
+            component: db-sync
+        - type: job
+          labels:
+            application: barbican
+            component: ks-user
+        - type: job
+          labels:
+            application: barbican
+            component: ks-service
+        - type: job
+          labels:
+            application: barbican
+            component: ks-endpoints
+  values:
+    endpoints:
+      identity:
+        auth:
+          admin:
+            password: ${KEYSTONE_ADMIN_PASSWORD}
+          barbican:
+            password: ${BARBICAN_USER_PASSWORD}
+      oslo_db:
+        auth:
+          admin:
+            password: ${DB_ADMIN_PASSWORD}
+          barbican:
+            password: ${BARBICAN_DB_PASSWORD}
+      oslo_cache:
+        auth:
+          memcache_secret_key: ${KEYSTONE_AUTHTOKEN_MEMCACHED_SECRET_KEY}
+      oslo_messaging:
+        auth:
+          admin:
+            username: barbican-rabbitmq-admin
+            password: ${BARBICAN_RABBITMQ_ADMIN_PASSWORD}
+          barbican:
+            username: barbican-rabbitmq-user
+            password: ${BARBICAN_RABBITMQ_USER_PASSWORD}
+        hosts:
+          default: barbican-rabbitmq
+    labels:
+      api:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+      job:
+        node_selector_key: openstack-control-plane
+        node_selector_value: enabled
+    pod:
+      replicas:
+        api: 2
+  source:
+    type: local
+    location: ${OSH_PATH}
+    subpath: barbican
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/Chart/v1
+metadata:
+  schema: metadata/Document/v1
+  name: prometheus-openstack-exporter
+data:
+  chart_name: prometheus-openstack-exporter
+  release: prometheus-openstack-exporter
+  namespace: openstack
+  timeout: 1800
+  install:
+    no_hooks: false
+  upgrade:
+    no_hooks: false
+    pre:
+      delete:
+        - type: job
+          labels:
+            application: prometheus-openstack-exporter
+            component: ks-user
+  values:
+    endpoints:
+      identity:
+        auth:
+          admin:
+            password: ${KEYSTONE_ADMIN_PASSWORD}
+          user:
+            password: ${OPENSTACK_EXPORTER_USER_PASSWORD}
+    labels:
+      node_selector_key: openstack-control-plane
+      node_selector_value: enabled
+  source:
+    type: local
+    location: ${OSH_INFRA_PATH}
+    subpath: prometheus-openstack-exporter
+    reference: master
+  dependencies:
+    - helm-toolkit
+---
+schema: armada/ChartGroup/v1
+metadata:
+  schema: metadata/Document/v1
+  name: openstack-ingress-controller
+data:
+  description: "OpenStack Ingress Controller"
+  sequenced: False
+  chart_group:
+    - openstack-ingress-controller
+---
+schema: armada/ChartGroup/v1
+metadata:
+  schema: metadata/Document/v1
+  name: openstack-ceph-config
+data:
+  description: "OpenStack Ceph Config"
+  sequenced: True
+  chart_group:
+    - openstack-ceph-config
+---
+schema: armada/ChartGroup/v1
+metadata:
+  schema: metadata/Document/v1
+  name: deploy-mariadb
+data:
+  description: "Mariadb"
+  sequenced: True
+  chart_group:
+    - mariadb
+---
+schema: armada/ChartGroup/v1
+metadata:
+  schema: metadata/Document/v1
+  name: deploy-memcached
+data:
+  description: "Memcached"
+  sequenced: True
+  chart_group:
+    - memcached
+---
+schema: armada/ChartGroup/v1
+metadata:
+  schema: metadata/Document/v1
+  name: openstack-infra-services
+data:
+  description: "OpenStack Infra Services"
+  sequenced: True
+  chart_group:
+    - libvirt
+    - openvswitch
+---
+schema: armada/ChartGroup/v1
+metadata:
+  schema: metadata/Document/v1
+  name: openstack-keystone
+data:
+  description: "Deploy keystone"
+  sequenced: True
+  chart_group:
+    - keystone-rabbitmq
+    - keystone
+---
+schema: armada/ChartGroup/v1
+metadata:
+  schema: metadata/Document/v1
+  name: openstack-glance
+data:
+  description: "Deploy glance"
+  sequenced: True
+  chart_group:
+    - glance-rabbitmq
+    - glance
+---
+schema: armada/ChartGroup/v1
+metadata:
+  schema: metadata/Document/v1
+  name: openstack-radosgw
+data:
+  description: "Deploy rados gateway"
+  sequenced: False
+  chart_group:
+    - radosgw-openstack
+---
+schema: armada/ChartGroup/v1
+metadata:
+  schema: metadata/Document/v1
+  name: openstack-cinder
+data:
+  description: "Deploy cinder"
+  sequenced: True
+  chart_group:
+    - cinder-rabbitmq
+    - cinder
+---
+schema: armada/ChartGroup/v1
+metadata:
+  schema: metadata/Document/v1
+  name: openstack-compute-kit
+data:
+  description: "Deploy nova and neutron"
+  sequenced: False
+  chart_group:
+    - nova-rabbitmq
+    - nova
+    - neutron-rabbitmq
+    - neutron
+---
+schema: armada/ChartGroup/v1
+metadata:
+  schema: metadata/Document/v1
+  name: openstack-heat
+data:
+  description: "Deploy heat"
+  sequenced: True
+  chart_group:
+    - heat-rabbitmq
+    - heat
+---
+schema: armada/ChartGroup/v1
+metadata:
+  schema: metadata/Document/v1
+  name: openstack-barbican
+data:
+  description: "Deploy barbican"
+  sequenced: True
+  chart_group:
+    - barbican-rabbitmq
+    - barbican
+---
+schema: armada/ChartGroup/v1
+metadata:
+  schema: metadata/Document/v1
+  name: prometheus-openstack-exporter
+data:
+  description: 'Deploy Prometheus OpenStack exporter'
+  sequenced: False
+  chart_group:
+    - prometheus-openstack-exporter
+---
+schema: armada/Manifest/v1
+metadata:
+  schema: metadata/Document/v1
+  name: armada-manifest
+data:
+  release_prefix: osh
+  chart_groups:
+    - openstack-ingress-controller
+    - openstack-ceph-config
+    - deploy-mariadb
+    - deploy-memcached
+    - openstack-infra-services
+    - openstack-keystone
+    - openstack-glance
+    - openstack-radosgw
+    - openstack-cinder
+    - openstack-compute-kit
+    - openstack-heat
+    - openstack-barbican
+    - prometheus-openstack-exporter

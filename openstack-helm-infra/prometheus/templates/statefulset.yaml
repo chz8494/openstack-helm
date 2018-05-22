@@ -1,0 +1,174 @@
+{{/*
+Copyright 2017 The Openstack-Helm Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{- if .Values.manifests.statefulset_prometheus }}
+{{- $envAll := . }}
+
+{{- $mounts_prometheus := .Values.pod.mounts.prometheus.prometheus }}
+{{- $mounts_prometheus_init := .Values.pod.mounts.prometheus.init_container }}
+
+{{- $serviceAccountName := printf "%s-%s" .Release.Name "prometheus"}}
+{{ tuple $envAll "prometheus" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  name: {{ $serviceAccountName }}
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+      - nodes/proxy
+      - services
+      - endpoints
+      - pods
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+  - nonResourceURLs:
+      - "/metrics"
+    verbs:
+      - get
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $serviceAccountName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $serviceAccountName }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ $serviceAccountName }}
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: apps/v1beta1
+kind: StatefulSet
+metadata:
+  name: prometheus
+spec:
+  serviceName: {{ tuple "monitoring" "internal" . | include "helm-toolkit.endpoints.hostname_short_endpoint_lookup" }}
+  replicas: {{ .Values.pod.replicas.prometheus }}
+  template:
+    metadata:
+      labels:
+{{ tuple $envAll "prometheus" "api" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+        configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
+        configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
+    spec:
+      serviceAccountName: {{ $serviceAccountName }}
+      affinity:
+{{ tuple $envAll "prometheus" "api" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+      nodeSelector:
+        {{ .Values.labels.prometheus.node_selector_key }}: {{ .Values.labels.prometheus.node_selector_value }}
+      terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.prometheus.timeout | default "30" }}
+      initContainers:
+{{ tuple $envAll "prometheus" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
+        - name: prometheus-perms
+{{ tuple $envAll "prometheus" | include "helm-toolkit.snippets.image" | indent 10 }}
+          securityContext:
+            runAsUser: 0
+{{ tuple $envAll $envAll.Values.pod.resources.prometheus | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+          command:
+            - chown
+            - -R
+            - "nobody:"
+            - /var/lib/prometheus/data
+          volumeMounts:
+            - name: storage
+              mountPath: /var/lib/prometheus/data
+      containers:
+        - name: prometheus
+{{ tuple $envAll "prometheus" | include "helm-toolkit.snippets.image" | indent 10 }}
+          command:
+            - /tmp/prometheus.sh
+            - start
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /tmp/prometheus.sh
+                  - stop
+{{ tuple $envAll $envAll.Values.pod.resources.prometheus | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+          ports:
+            - name: prom-metrics
+              containerPort: {{ tuple "monitoring" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: {{ tuple "monitoring" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+            initialDelaySeconds: 30
+            timeoutSeconds: 30
+          volumeMounts:
+            - name: etcprometheus
+              mountPath: /etc/config
+            - name: rulesprometheus
+              mountPath: /etc/config/rules
+            {{- range $key, $value := .Values.conf.prometheus.rules }}
+            - name: prometheus-etc
+              mountPath: /etc/config/rules/{{ $key }}.rules
+              subPath: {{ $key }}.rules
+              readOnly: true
+            {{- end }}
+            - name: prometheus-etc
+              mountPath: /etc/config/prometheus.yml
+              subPath: prometheus.yml
+              readOnly: true
+            - name: prometheus-bin
+              mountPath: /tmp/prometheus.sh
+              subPath: prometheus.sh
+              readOnly: true
+            - name: storage
+              mountPath: /var/lib/prometheus/data
+{{ if $mounts_prometheus.volumeMounts }}{{ toYaml $mounts_prometheus.volumeMounts | indent 12 }}{{ end }}
+      volumes:
+        - name: etcprometheus
+          emptyDir: {}
+        - name: rulesprometheus
+          emptyDir: {}
+        - name: prometheus-etc
+          configMap:
+            name: prometheus-etc
+        - name: prometheus-bin
+          configMap:
+            name: prometheus-bin
+            defaultMode: 0555
+{{ if $mounts_prometheus.volumes }}{{ toYaml $mounts_prometheus.volumes | indent 8 }}{{ end }}
+{{- if not .Values.storage.enabled }}
+        - name: storage
+          emptyDir: {}
+{{- else }}
+  volumeClaimTemplates:
+    - metadata:
+        name: storage
+      spec:
+        accessModes: {{ .Values.storage.pvc.access_mode }}
+        resources:
+          requests:
+            storage: {{ .Values.storage.requests.storage  }}
+        storageClassName: {{ .Values.storage.storage_class }}
+{{- end }}
+{{- end }}

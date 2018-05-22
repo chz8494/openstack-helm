@@ -1,0 +1,5 @@
+export ETCD_ENDPOINTS=http://10.96.232.136:6666
+if [ -e  ]; then export ETCD_KEY_FILE=; fi;
+if [ -e  ]; then export ETCD_CERT_FILE=; fi;
+if [ -e  ]; then export ETCD_CA_CERT_FILE=; fi;
+exec /opt/cni/bin/calicoctl.bin $*

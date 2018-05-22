@@ -1,0 +1,152 @@
+{{/*
+Copyright 2017 The Openstack-Helm Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{- if .Values.manifests.deployment_fluentd }}
+{{- $envAll := . }}
+{{- $esUserSecret := .Values.secrets.elasticsearch.user }}
+
+{{- $mounts_fluentd := .Values.pod.mounts.fluentd.fluentd }}
+
+{{- $serviceAccountName := printf "%s-%s" .Release.Name "fluentd" }}
+{{ tuple $envAll "fluentd" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $serviceAccountName }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $serviceAccountName }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  kind: ClusterRole
+  name: {{ $serviceAccountName }}
+  apiGroup: rbac.authorization.k8s.io
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ $serviceAccountName }}
+rules:
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+      - nodes
+      - pods
+      - services
+      - replicationcontrollers
+      - limitranges
+    verbs:
+      - list
+      - watch
+  - apiGroups:
+      - extensions
+    resources:
+      - daemonsets
+      - deployments
+      - replicasets
+    verbs:
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - statefulsets
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: fluentd
+spec:
+  replicas: {{ .Values.pod.replicas.fluentd }}
+{{ tuple $envAll  | include "helm-toolkit.snippets.kubernetes_upgrades_deployment" | indent 2 }}
+  template:
+    metadata:
+      labels:
+{{ tuple $envAll "fluentd" "internal" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+        configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
+        configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
+    spec:
+      serviceAccountName: {{ $serviceAccountName }}
+      affinity:
+{{ tuple $envAll "fluentd" "internal" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+      nodeSelector:
+        {{ .Values.labels.fluentd.node_selector_key }}: {{ .Values.labels.fluentd.node_selector_value }}
+      terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.fluentd.timeout | default "30" }}
+      initContainers:
+{{ tuple $envAll "fluentd" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
+      containers:
+        - name: fluentd
+          image: {{ .Values.images.tags.fluentd }}
+          imagePullPolicy: {{ .Values.images.pull_policy }}
+{{ tuple $envAll $envAll.Values.pod.resources.fluentd | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+          command:
+            - /tmp/fluentd.sh
+            - start
+          ports:
+            - name: forward
+              containerPort: {{ tuple "fluentd" "internal" "service" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+            - name: metrics
+              containerPort: {{ tuple "fluentd" "internal" "metrics" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+          env:
+            - name: FLUENTD_PORT
+              value: {{ tuple "fluentd" "internal" "service" . | include "helm-toolkit.endpoints.endpoint_port_lookup" | quote }}
+            - name: ELASTICSEARCH_HOST
+              value: {{ tuple "elasticsearch" "internal" . | include "helm-toolkit.endpoints.hostname_short_endpoint_lookup" | quote }}
+            - name: ELASTICSEARCH_PORT
+              value: {{ tuple "elasticsearch" "internal" "http" . | include "helm-toolkit.endpoints.endpoint_port_lookup" | quote }}
+            - name: ELASTICSEARCH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $esUserSecret }}
+                  key: ELASTICSEARCH_USERNAME
+            - name: ELASTICSEARCH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $esUserSecret }}
+                  key: ELASTICSEARCH_PASSWORD
+          volumeMounts:
+            - name: pod-etc-fluentd
+              mountPath: /etc/td-agent
+            - name: fluent-logging-etc
+              mountPath: /etc/td-agent/td-agent.conf
+              subPath: td-agent.conf
+              readOnly: true
+            - name: fluent-logging-bin
+              mountPath: /tmp/fluentd.sh
+              subPath: fluentd.sh
+              readOnly: true
+{{- if $mounts_fluentd.volumeMounts }}{{ toYaml $mounts_fluentd.volumeMounts | indent 12 }}{{- end }}
+      volumes:
+        - name: pod-etc-fluentd
+          emptyDir: {}
+        - name: fluent-logging-etc
+          configMap:
+            name: fluent-logging-etc
+            defaultMode: 0444
+        - name: fluent-logging-bin
+          configMap:
+            name: fluent-logging-bin
+            defaultMode: 0555
+{{- if $mounts_fluentd.volumes }}{{ toYaml $mounts_fluentd.volumes | indent 8 }}{{- end }}
+{{- end }}

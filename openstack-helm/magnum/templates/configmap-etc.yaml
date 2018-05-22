@@ -1,0 +1,88 @@
+{{/*
+Copyright 2017 The Openstack-Helm Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{- if .Values.manifests.configmap_etc }}
+{{- $envAll := . }}
+
+{{- if empty .Values.conf.magnum.keystone_authtoken.auth_uri -}}
+{{- tuple "identity" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup"| set .Values.conf.magnum.keystone_authtoken "auth_uri" | quote | trunc 0 -}}
+{{- end -}}
+
+{{- if empty .Values.conf.magnum.keystone_authtoken.auth_url -}}
+{{- tuple "identity" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup"| set .Values.conf.magnum.keystone_authtoken "auth_url" | quote | trunc 0 -}}
+{{- end -}}
+
+{{- if empty .Values.conf.magnum.keystone_authtoken.region_name -}}
+{{- set .Values.conf.magnum.keystone_authtoken "region_name" .Values.endpoints.identity.auth.magnum.region_name | quote | trunc 0 -}}
+{{- end -}}
+{{- if empty .Values.conf.magnum.keystone_authtoken.project_name -}}
+{{- set .Values.conf.magnum.keystone_authtoken "project_name" .Values.endpoints.identity.auth.magnum.project_name | quote | trunc 0 -}}
+{{- end -}}
+{{- if empty .Values.conf.magnum.keystone_authtoken.project_domain_name -}}
+{{- set .Values.conf.magnum.keystone_authtoken "project_domain_name" .Values.endpoints.identity.auth.magnum.project_domain_name | quote | trunc 0 -}}
+{{- end -}}
+{{- if empty .Values.conf.magnum.keystone_authtoken.user_domain_name -}}
+{{- set .Values.conf.magnum.keystone_authtoken "user_domain_name" .Values.endpoints.identity.auth.magnum.user_domain_name | quote | trunc 0 -}}
+{{- end -}}
+{{- if empty .Values.conf.magnum.keystone_authtoken.username -}}
+{{- set .Values.conf.magnum.keystone_authtoken "username" .Values.endpoints.identity.auth.magnum.username | quote | trunc 0 -}}
+{{- end -}}
+{{- if empty .Values.conf.magnum.keystone_authtoken.password -}}
+{{- set .Values.conf.magnum.keystone_authtoken "password" .Values.endpoints.identity.auth.magnum.password | quote | trunc 0 -}}
+{{- end -}}
+
+{{- if empty .Values.conf.magnum.keystone_authtoken.memcached_servers -}}
+{{- tuple "oslo_cache" "internal" "memcache" . | include "helm-toolkit.endpoints.host_and_port_endpoint_uri_lookup" | set .Values.conf.magnum.keystone_authtoken "memcached_servers" | quote | trunc 0 -}}
+{{- end -}}
+{{- if empty .Values.conf.magnum.keystone_authtoken.memcache_secret_key -}}
+{{- set .Values.conf.magnum.keystone_authtoken "memcache_secret_key" ( default ( randAlphaNum 64 ) .Values.endpoints.oslo_cache.auth.memcache_secret_key ) | quote | trunc 0 -}}
+{{- end -}}
+
+{{- if empty .Values.conf.magnum.database.connection -}}
+{{- tuple "oslo_db" "internal" "magnum" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup"| set .Values.conf.magnum.database "connection" | quote | trunc 0 -}}
+{{- end -}}
+
+{{- if empty .Values.conf.magnum.DEFAULT.transport_url -}}
+{{- tuple "oslo_messaging" "internal" "magnum" "amqp" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" | set .Values.conf.magnum.DEFAULT "transport_url" | quote | trunc 0 -}}
+{{- end -}}
+
+{{- if empty .Values.conf.magnum.api.port -}}
+{{- tuple "container-infra" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" | set .Values.conf.magnum.api "port" | quote | trunc 0 -}}
+{{- end -}}
+
+{{- if empty .Values.conf.magnum.trust.trustee_domain_name -}}
+{{- set .Values.conf.magnum.trust "trustee_domain_name" .Values.endpoints.identity.auth.magnum_stack_user.domain_name | quote | trunc 0 -}}
+{{- end -}}
+{{- if empty .Values.conf.magnum.trust.trustee_domain_admin_name -}}
+{{- set .Values.conf.magnum.trust "trustee_domain_admin_name" .Values.endpoints.identity.auth.magnum_stack_user.username | quote | trunc 0 -}}
+{{- end -}}
+{{- if empty .Values.conf.magnum.trust.trustee_domain_admin_password -}}
+{{- set .Values.conf.magnum.trust "trustee_domain_admin_password" .Values.endpoints.identity.auth.magnum_stack_user.password | quote | trunc 0 -}}
+{{- end -}}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: magnum-etc
+data:
+  magnum.conf: |
+{{ include "helm-toolkit.utils.to_oslo_conf" .Values.conf.magnum | indent 4 }}
+  api-paste.ini: |
+{{ include "helm-toolkit.utils.to_ini" .Values.conf.paste | indent 4 }}
+  policy.json: |
+{{ toJson .Values.conf.policy | indent 4 }}
+{{- end }}

@@ -1,0 +1,1 @@
+../developer/common/050-mariadb.sh

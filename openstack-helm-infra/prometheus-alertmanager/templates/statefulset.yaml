@@ -1,0 +1,134 @@
+{{/*
+Copyright 2017 The Openstack-Helm Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{- if .Values.manifests.statefulset }}
+{{- $envAll := . }}
+
+{{- $mounts_alertmanager := .Values.pod.mounts.alertmanager.alertmanager }}
+{{- $mounts_alertmanager_init := .Values.pod.mounts.alertmanager.init_container }}
+
+{{- $serviceAccountName := "alertmanager"}}
+{{ tuple $envAll "alertmanager" $serviceAccountName | include "helm-toolkit.snippets.kubernetes_pod_rbac_serviceaccount" }}
+---
+apiVersion: apps/v1beta1
+kind: StatefulSet
+metadata:
+  name: alertmanager
+spec:
+  serviceName: {{ tuple "alerts" "discovery" . | include "helm-toolkit.endpoints.hostname_short_endpoint_lookup" }}
+  replicas: {{ .Values.pod.replicas.alertmanager }}
+  template:
+    metadata:
+      labels:
+{{ tuple $envAll "alertmanager" "server" | include "helm-toolkit.snippets.kubernetes_metadata_labels" | indent 8 }}
+      annotations:
+        configmap-bin-hash: {{ tuple "configmap-bin.yaml" . | include "helm-toolkit.utils.hash" }}
+        configmap-etc-hash: {{ tuple "configmap-etc.yaml" . | include "helm-toolkit.utils.hash" }}
+    spec:
+      serviceAccountName: {{ $serviceAccountName }}
+      affinity:
+{{ tuple $envAll "alertmanager" "server" | include "helm-toolkit.snippets.kubernetes_pod_anti_affinity" | indent 8 }}
+      nodeSelector:
+        {{ .Values.labels.alertmanager.node_selector_key }}: {{ .Values.labels.alertmanager.node_selector_value }}
+      terminationGracePeriodSeconds: {{ .Values.pod.lifecycle.termination_grace_period.alertmanager.timeout | default "30" }}
+      initContainers:
+{{ tuple $envAll "alertmanager" list | include "helm-toolkit.snippets.kubernetes_entrypoint_init_container" | indent 8 }}
+        - name: alertmanager-perms
+{{ tuple $envAll "alertmanager" | include "helm-toolkit.snippets.image" | indent 10 }}
+          securityContext:
+            runAsUser: 0
+{{ tuple $envAll $envAll.Values.pod.resources.alertmanager | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+          command:
+            - chown
+            - -R
+            - "nobody:"
+            - /var/lib/alertmanager/data
+          volumeMounts:
+            - name: alertmanager-data
+              mountPath: /var/lib/alertmanager/data
+      containers:
+        - name: alertmanager
+{{ tuple $envAll "alertmanager" | include "helm-toolkit.snippets.image" | indent 10 }}
+          command:
+            - /tmp/alertmanager.sh
+            - start
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /tmp/alertmanager.sh
+                  - stop
+{{ tuple $envAll $envAll.Values.pod.resources.alertmanager | include "helm-toolkit.snippets.kubernetes_resources" | indent 10 }}
+          env:
+            - name: DISCOVERY_SVC
+              value: {{ tuple "alerts" "discovery" . | include "helm-toolkit.endpoints.hostname_short_endpoint_lookup" }}
+            - name: MESH_PORT
+              value: {{ tuple "alerts" "internal" "mesh" . | include "helm-toolkit.endpoints.endpoint_port_lookup" | quote }}
+          ports:
+            - name: alerts-api
+              containerPort: {{ tuple "alerts" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+            - name: peer-mesh
+              containerPort: {{ tuple "alerts" "internal" "mesh" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+          readinessProbe:
+            httpGet:
+              path: /#/status
+              port: {{ tuple "alerts" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" }}
+            initialDelaySeconds: 30
+            timeoutSeconds: 30
+          volumeMounts:
+            - name: etc-alertmanager
+              mountPath: /etc/config
+            - name: alertmanager-etc
+              mountPath: /etc/alertmanager/template/alert-templates.tmpl
+              subPath: alert-templates.tmpl
+              readOnly: true
+            - name: alertmanager-etc
+              mountPath: /etc/config/alertmanager.yml
+              subPath: alertmanager.yml
+              readOnly: true
+            - name: alertmanager-bin
+              mountPath: /tmp/alertmanager.sh
+              subPath: alertmanager.sh
+              readOnly: true
+            - name: alertmanager-data
+              mountPath: /var/lib/alertmanager/data
+{{ if $mounts_alertmanager.volumeMounts }}{{ toYaml $mounts_alertmanager.volumeMounts | indent 12 }}{{ end }}
+      volumes:
+        - name: etc-alertmanager
+          emptyDir: {}
+        - name: alertmanager-etc
+          configMap:
+            name: alertmanager-etc
+        - name: alertmanager-bin
+          configMap:
+            name: alertmanager-bin
+            defaultMode: 0555
+{{ if $mounts_alertmanager.volumes }}{{ toYaml $mounts_alertmanager.volumes | indent 8 }}{{ end }}
+{{- if not .Values.storage.enabled }}
+        - name: alertmanager-data
+          emptyDir: {}
+{{- else }}
+  volumeClaimTemplates:
+    - metadata:
+        name: alertmanager-data
+      spec:
+        accessModes: {{ .Values.storage.pvc.access_mode }}
+        resources:
+          requests:
+            storage: {{ .Values.storage.requests.storage  }}
+        storageClassName: {{ .Values.storage.storage_class }}
+{{- end }}
+{{- end }}

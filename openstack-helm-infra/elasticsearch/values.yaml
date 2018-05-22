@@ -1,0 +1,456 @@
+# Copyright 2017 The Openstack-Helm Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Default values for elasticsearch
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+images:
+  tags:
+    apache_proxy: docker.io/httpd:2.4
+    memory_init: docker.io/kolla/ubuntu-source-heat-engine:3.0.3
+    curator:  docker.io/bobrik/curator:5.2.0
+    elasticsearch: docker.io/elasticsearch:5.6.4
+    helm_tests: docker.io/kolla/ubuntu-source-heat-engine:3.0.3
+    prometheus_elasticsearch_exporter: docker.io/justwatch/elasticsearch_exporter:1.0.1
+    dep_check: quay.io/stackanetes/kubernetes-entrypoint:v0.3.1
+    snapshot_repository: docker.io/kolla/ubuntu-source-heat-engine:3.0.3
+    image_repo_sync: docker.io/docker:17.07.0
+  pull_policy: "IfNotPresent"
+  local_registry:
+    active: false
+    exclude:
+      - dep_check
+      - image_repo_sync
+
+labels:
+  elasticsearch:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+  job:
+    node_selector_key: openstack-control-plane
+    node_selector_value: enabled
+
+dependencies:
+  dynamic:
+    common:
+      local_image_registry:
+        jobs:
+          - elasticsearch-image-repo-sync
+        services:
+          - endpoint: node
+            service: local_image_registry
+  static:
+    curator:
+      services: null
+    elasticsearch_client:
+      services: null
+    elasticsearch_data:
+      services: null
+    elasticsearch_master:
+      services: null
+    image_repo_sync:
+      services:
+        - endpoint: internal
+          service: local_image_registry
+    prometheus_elasticsearch_exporter:
+      services:
+        - endpoint: internal
+          service: elasticsearch
+    snapshot_repository:
+      services:
+        - endpoint: internal
+          service: elasticsearch
+
+pod:
+  affinity:
+      anti:
+        type:
+          default: preferredDuringSchedulingIgnoredDuringExecution
+        topologyKey:
+          default: kubernetes.io/hostname
+  replicas:
+    master: 3
+    data: 3
+    client: 2
+  lifecycle:
+    upgrades:
+      deployments:
+        revision_history: 3
+        pod_replacement_strategy: RollingUpdate
+        rolling_update:
+          max_unavailable: 1
+          max_surge: 3
+    termination_grace_period:
+      master:
+        timeout: 600
+      data:
+        timeout: 600
+      client:
+        timeout: 600
+      prometheus_elasticsearch_exporter:
+        timeout: 600
+  mounts:
+    elasticsearch:
+      elasticsearch:
+  resources:
+    enabled: false
+    apache_proxy:
+      limits:
+        memory: "1024Mi"
+        cpu: "2000m"
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+    client:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "1024Mi"
+        cpu: "2000m"
+    master:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "1024Mi"
+        cpu: "2000m"
+    data:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "1024Mi"
+        cpu: "2000m"
+    prometheus_elasticsearch_exporter:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
+      limits:
+        memory: "1024Mi"
+        cpu: "2000m"
+    jobs:
+      curator:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "1024Mi"
+          cpu: "2000m"
+      image_repo_sync:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "1024Mi"
+          cpu: "2000m"
+      snapshot_repository:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "1024Mi"
+          cpu: "2000m"
+      tests:
+        requests:
+          memory: "128Mi"
+          cpu: "100m"
+        limits:
+          memory: "1024Mi"
+          cpu: "2000m"
+
+secrets:
+  elasticsearch:
+    user: elasticsearch-admin-creds
+
+conf:
+  apache:
+    httpd: null
+    elasticsearch_host: null
+  init:
+    max_map_count: 262144
+  curator:
+    #run every 6th hour
+    schedule:  "0 */6 * * *"
+    action_file:
+      # Remember, leave a key empty if there is no value.  None will be a string,
+      # not a Python "NoneType"
+      #
+      # Also remember that all examples have 'disable_action' set to True.  If you
+      # want to use this action as a template, be sure to set this to False after
+      # copying it.
+      actions:
+        1:
+          action: delete_indices
+          description: >-
+            "Delete indices older than 7 days"
+          options:
+            timeout_override:
+            continue_if_exception: False
+            ignore_empty_list: True
+            disable_action: True
+          filters:
+          - filtertype: pattern
+            kind: prefix
+            value: logstash-
+          - filtertype: age
+            source: name
+            direction: older
+            timestring: '%Y.%m.%d'
+            unit: days
+            unit_count: 7
+        2:
+          action: delete_indices
+          description: >-
+            "Delete indices by age if available disk space is
+             less than 80% total disk"
+          options:
+            timeout_override: 600
+            continue_if_exception: False
+            ignore_empty_list: True
+            disable_action: True
+          filters:
+          - filtertype: pattern
+            kind: prefix
+            value: logstash-
+          - filtertype: space
+            source: creation_date
+            use_age: True
+            # This space assumes the default PVC size of 5Gi times three data
+            # replicas. This must be adjusted if changed due to Curator being
+            # unable to calculate percentages of total disk space
+            disk_space: 12
+        3:
+          action: snapshot
+          description: >-
+            "Snapshot indices older than one day"
+          options:
+            repository: default_repo
+            # Leaving this blank results in the default name format
+            name:
+            wait_for_completion: True
+            max_wait: 3600
+            wait_interval: 10
+            timeout_override: 600
+            ignore_empty_list: True
+            continue_if_exception: False
+            disable_action: True
+          filters:
+          - filtertype: age
+            source: name
+            direction: older
+            timestring: '%Y.%m.%d'
+            unit: days
+            unit_count: 1
+        4:
+          action: delete_snapshots
+          description: >-
+            "Delete snapshots older than 30 days"
+          options:
+            repository: default_repo
+            disable_action: True
+            timeout_override: 600
+            ignore_empty_list: True
+          filters:
+          - filtertype: pattern
+            kind: prefix
+            value: curator-
+            exclude:
+          - filtertype: age
+            source: creation_date
+            direction: older
+            unit: days
+            unit_count: 30
+    config:
+      # Remember, leave a key empty if there is no value.  None will be a string,
+      # not a Python "NoneType"
+      client:
+        hosts:
+          - ${ELASTICSEARCH_HOST}
+        use_ssl: False
+        ssl_no_validate: False
+        timeout: 60
+      logging:
+        loglevel: INFO
+        logformat: logstash
+        blacklist: ['elasticsearch', 'urllib3']
+  elasticsearch:
+    config:
+      bootstrap:
+        memory_lock: true
+      cluster:
+        name: elasticsearch
+      discovery:
+        zen:
+          ping.unicast.hosts: ${DISCOVERY_SERVICE}
+          minimum_master_nodes: 2
+      http:
+        enabled: ${HTTP_ENABLE}
+        compression: true
+      network:
+        host: 0.0.0.0
+      node:
+        master: ${NODE_MASTER}
+        data: ${NODE_DATA}
+        name: ${NODE_NAME}
+        max_local_storage_nodes: 3
+      path:
+        data: /usr/share/elasticsearch/data
+        logs: /usr/share/elasticsearch/logs
+    repository:
+      enabled: false
+      name: default_repo
+      location: /var/lib/openstack-helm/elasticsearch
+      type: fs
+    env:
+      java_opts: "-Xms256m -Xmx256m"
+  log4j2:
+    override:
+    prefix:
+    append:
+  prometheus_elasticsearch_exporter:
+    es:
+      all: true
+      timeout: 20s
+
+endpoints:
+  cluster_domain_suffix: cluster.local
+  local_image_registry:
+    name: docker-registry
+    namespace: docker-registry
+    hosts:
+      default: localhost
+      internal: docker-registry
+      node: localhost
+    host_fqdn_override:
+      default: null
+    port:
+      registry:
+        node: 5000
+  elasticsearch:
+    name: elasticsearch
+    namespace: null
+    auth:
+      admin:
+        username: admin
+        password: changeme
+    hosts:
+      data: elasticsearch-data
+      default: elasticsearch-logging
+      discovery: elasticsearch-discovery
+      public: elasticsearch
+    host_fqdn_override:
+      default: null
+    path:
+      default: null
+    scheme:
+      default: http
+    port:
+      client:
+        default: 9200
+      http:
+        default: 80
+      discovery:
+        default: 9300
+  prometheus_elasticsearch_exporter:
+    namespace: null
+    hosts:
+      default: elasticsearch-exporter
+    host_fqdn_override:
+      default: null
+    path:
+      default: /metrics
+    scheme:
+      default: 'http'
+    port:
+      metrics:
+        default: 9108
+  ldap:
+    hosts:
+      default: ldap
+    auth:
+      admin:
+        bind: "cn=admin,dc=cluster,dc=local"
+        password: password
+    host_fqdn_override:
+      default: null
+    path:
+      default: "/ou=People,dc=cluster,dc=local"
+    scheme:
+      default: ldap
+    port:
+      ldap:
+        default: 389
+
+monitoring:
+  prometheus:
+    enabled: false
+    elasticsearch_exporter:
+      scrape: true
+
+network:
+  client:
+    node_port:
+      enabled: false
+      port: 30920
+  discovery:
+    node_port:
+      enabled: false
+      port: 30930
+  data:
+    node_port:
+      enabled: false
+      port: 30931
+
+storage:
+  elasticsearch:
+    enabled: true
+    pvc:
+      name: pvc-elastic
+      access_mode: [ "ReadWriteOnce" ]
+    requests:
+      storage: 5Gi
+    storage_class: general
+  filesystem_repository:
+    enabled: false
+    pvc:
+      name: pvc-snapshots
+      access_mode: ReadWriteMany
+    requests:
+      storage: 5Gi
+    storage_class: general
+
+
+manifests:
+  configmap_bin: true
+  configmap_etc: true
+  cron_curator: true
+  deployment_client: true
+  deployment_master: true
+  job_image_repo_sync: true
+  job_snapshot_repository: false
+  helm_tests: true
+  pvc_snapshots: false
+  secret_elasticsearch: true
+  monitoring:
+    prometheus:
+      configmap_bin_exporter: true
+      deployment_exporter: true
+      service_exporter: true
+  pvc_snapshots: true
+  service_data: true
+  service_discovery: true
+  service_logging: true
+  statefulset_data: true

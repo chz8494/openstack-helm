@@ -1,0 +1,82 @@
+{{/*
+Copyright 2017 The Openstack-Helm Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/}}
+
+{{- if .Values.manifests.configmap_etc }}
+{{- $envAll := . }}
+
+{{- if empty .Values.conf.mistral.keystone_authtoken.auth_uri -}}
+{{- tuple "identity" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup"| set .Values.conf.mistral.keystone_authtoken "auth_uri" | quote | trunc 0 -}}
+{{- end -}}
+
+{{- if empty .Values.conf.mistral.keystone_authtoken.auth_url -}}
+{{- tuple "identity" "internal" "api" . | include "helm-toolkit.endpoints.keystone_endpoint_uri_lookup"| set .Values.conf.mistral.keystone_authtoken "auth_url" | quote | trunc 0 -}}
+{{- end -}}
+
+{{- if empty .Values.conf.mistral.keystone_authtoken.region_name -}}
+{{- set .Values.conf.mistral.keystone_authtoken "region_name" .Values.endpoints.identity.auth.mistral.region_name | quote | trunc 0 -}}
+{{- end -}}
+{{- if empty .Values.conf.mistral.keystone_authtoken.project_name -}}
+{{- set .Values.conf.mistral.keystone_authtoken "project_name" .Values.endpoints.identity.auth.mistral.project_name | quote | trunc 0 -}}
+{{- end -}}
+{{- if empty .Values.conf.mistral.keystone_authtoken.project_domain_name -}}
+{{- set .Values.conf.mistral.keystone_authtoken "project_domain_name" .Values.endpoints.identity.auth.mistral.project_domain_name | quote | trunc 0 -}}
+{{- end -}}
+{{- if empty .Values.conf.mistral.keystone_authtoken.user_domain_name -}}
+{{- set .Values.conf.mistral.keystone_authtoken "user_domain_name" .Values.endpoints.identity.auth.mistral.user_domain_name | quote | trunc 0 -}}
+{{- end -}}
+{{- if empty .Values.conf.mistral.keystone_authtoken.username -}}
+{{- set .Values.conf.mistral.keystone_authtoken "username" .Values.endpoints.identity.auth.mistral.username | quote | trunc 0 -}}
+{{- end -}}
+{{- if empty .Values.conf.mistral.keystone_authtoken.password -}}
+{{- set .Values.conf.mistral.keystone_authtoken "password" .Values.endpoints.identity.auth.mistral.password | quote | trunc 0 -}}
+{{- end -}}
+
+{{- if empty .Values.conf.mistral.keystone_authtoken.memcached_servers -}}
+{{- tuple "oslo_cache" "internal" "memcache" . | include "helm-toolkit.endpoints.host_and_port_endpoint_uri_lookup" | set .Values.conf.mistral.keystone_authtoken "memcached_servers" | quote | trunc 0 -}}
+{{- end -}}
+{{- if empty .Values.conf.mistral.keystone_authtoken.memcache_secret_key -}}
+{{- set .Values.conf.mistral.keystone_authtoken "memcache_secret_key" ( default ( randAlphaNum 64 ) .Values.endpoints.oslo_cache.auth.memcache_secret_key ) | quote | trunc 0 -}}
+{{- end -}}
+
+{{- if empty .Values.conf.mistral.database.connection -}}
+{{- tuple "oslo_db" "internal" "mistral" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup"| set .Values.conf.mistral.database "connection" | quote | trunc 0 -}}
+{{- end -}}
+
+{{- if empty .Values.conf.mistral.DEFAULT.transport_url -}}
+{{- tuple "oslo_messaging" "internal" "mistral" "amqp" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" | set .Values.conf.mistral.DEFAULT "transport_url" | quote | trunc 0 -}}
+{{- end -}}
+
+{{- if empty .Values.conf.mistral.api.port -}}
+{{- tuple "workflowv2" "internal" "api" . | include "helm-toolkit.endpoints.endpoint_port_lookup" | set .Values.conf.mistral.api "port" | quote | trunc 0 -}}
+{{- end -}}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mistral-etc
+data:
+  rally_tests.yaml: |
+{{ toYaml .Values.conf.rally_tests.tests | indent 4 }}
+  mistral.conf: |
+{{ include "helm-toolkit.utils.to_oslo_conf" .Values.conf.mistral | indent 4 }}
+  policy.json: |
+{{  toJson .Values.conf.policy | indent 4 }}
+{{- range $key, $value := $envAll.Values.conf.rally_tests.templates }}
+  {{ printf "test_template_%d" $key }}: |
+{{ $value.template | indent 4 }}
+{{- end }}
+{{- end }}

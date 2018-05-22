@@ -1,0 +1,264 @@
+# Copyright 2017 The Openstack-Helm Authors.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+- project:
+    check:
+      jobs:
+        - openstack-helm-infra-linter:
+            voting: true
+        - openstack-helm-infra-ubuntu:
+            voting: true
+            irrelevant-files:
+              - ^.*\.rst$
+              - ^doc/.*$
+              - ^releasenotes/.*$
+        - openstack-helm-infra-centos:
+            voting: true
+            irrelevant-files:
+              - ^.*\.rst$
+              - ^doc/.*$
+              - ^releasenotes/.*$
+        - openstack-helm-infra-fedora:
+            voting: false
+            irrelevant-files:
+              - ^.*\.rst$
+              - ^doc/.*$
+              - ^releasenotes/.*$
+        - openstack-helm-infra-dev-deploy:
+            voting: false
+            irrelevant-files:
+              - ^.*\.rst$
+              - ^doc/.*$
+              - ^releasenotes/.*$
+        - openstack-helm-infra-kubernetes-keystone-auth:
+            voting: false
+            irrelevant-files:
+              - ^.*\.rst$
+              - ^doc/.*$
+              - ^releasenotes/.*$
+    gate:
+      jobs:
+        - openstack-helm-infra-linter:
+            irrelevant-files:
+              - ^.*\.rst$
+              - ^doc/.*$
+              - ^releasenotes/.*$
+        - openstack-helm-infra-ubuntu:
+            irrelevant-files:
+              - ^.*\.rst$
+              - ^doc/.*$
+              - ^releasenotes/.*$
+        - openstack-helm-infra-centos:
+            irrelevant-files:
+              - ^.*\.rst$
+              - ^doc/.*$
+              - ^releasenotes/.*$
+
+- nodeset:
+    name: openstack-helm-single-node
+    nodes:
+      - name: primary
+        label: ubuntu-xenial
+
+- nodeset:
+    name: openstack-helm-ubuntu
+    nodes:
+      - name: primary
+        label: ubuntu-xenial
+      - name: node-1
+        label: ubuntu-xenial
+      - name: node-2
+        label: ubuntu-xenial
+    groups:
+      - name: primary
+        nodes:
+          - primary
+      - name: nodes
+        nodes:
+          - node-1
+          - node-2
+
+- nodeset:
+    name: openstack-helm-centos
+    nodes:
+      - name: primary
+        label: centos-7
+      - name: node-1
+        label: centos-7
+      - name: node-2
+        label: centos-7
+    groups:
+      - name: primary
+        nodes:
+          - primary
+      - name: nodes
+        nodes:
+          - node-1
+          - node-2
+
+- nodeset:
+    name: openstack-helm-fedora
+    nodes:
+      - name: primary
+        label: fedora-27
+      - name: node-1
+        label: fedora-27
+      - name: node-2
+        label: fedora-27
+    groups:
+      - name: primary
+        nodes:
+          - primary
+      - name: nodes
+        nodes:
+          - node-1
+          - node-2
+
+
+- nodeset:
+    name: openstack-helm-five-node-ubuntu
+    nodes:
+      - name: primary
+        label: ubuntu-xenial
+      - name: node-1
+        label: ubuntu-xenial
+      - name: node-2
+        label: ubuntu-xenial
+      - name: node-3
+        label: ubuntu-xenial
+      - name: node-4
+        label: ubuntu-xenial
+    groups:
+      - name: primary
+        nodes:
+          - primary
+      - name: nodes
+        nodes:
+          - node-1
+          - node-2
+          - node-3
+          - node-4
+
+- nodeset:
+    name: openstack-helm-five-node-centos
+    nodes:
+      - name: primary
+        label: centos-7
+      - name: node-1
+        label: centos-7
+      - name: node-2
+        label: centos-7
+      - name: node-3
+        label: centos-7
+      - name: node-4
+        label: centos-7
+    groups:
+      - name: primary
+        nodes:
+          - primary
+      - name: nodes
+        nodes:
+          - node-1
+          - node-2
+          - node-3
+          - node-4
+
+- nodeset:
+    name: openstack-helm-five-node-fedora
+    nodes:
+      - name: primary
+        label: fedora-27
+      - name: node-1
+        label: fedora-27
+      - name: node-2
+        label: fedora-27
+      - name: node-3
+        label: fedora-27
+      - name: node-4
+        label: fedora-27
+    groups:
+      - name: primary
+        nodes:
+          - primary
+      - name: nodes
+        nodes:
+          - node-1
+          - node-2
+          - node-3
+          - node-4
+
+- job:
+    name: openstack-helm-infra-linter
+    run: playbooks/zuul-linter.yaml
+    nodeset: openstack-helm-single-node
+
+- job:
+    name: openstack-helm-infra
+    timeout: 3600
+    pre-run:
+      - playbooks/osh-infra-upgrade-host.yaml
+      - playbooks/osh-infra-deploy-docker.yaml
+      - playbooks/osh-infra-build.yaml
+      - playbooks/osh-infra-deploy-k8s.yaml
+    run: playbooks/osh-infra-multinode-deploy.yaml
+    post-run: playbooks/osh-infra-collect-logs.yaml
+
+- job:
+    name: openstack-helm-infra-ubuntu
+    parent: openstack-helm-infra
+    nodeset: openstack-helm-ubuntu
+
+- job:
+    name: openstack-helm-infra-centos
+    parent: openstack-helm-infra
+    nodeset: openstack-helm-centos
+
+- job:
+    name: openstack-helm-infra-fedora
+    parent: openstack-helm-infra
+    nodeset: openstack-helm-fedora
+
+- job:
+    name: openstack-helm-infra-dev-deploy
+    timeout: 7200
+    pre-run: playbooks/osh-infra-upgrade-host.yaml
+    run: playbooks/osh-infra-dev-deploy.yaml
+    post-run: playbooks/osh-infra-collect-logs.yaml
+    nodeset: openstack-helm-single-node
+
+- job:
+    name: openstack-helm-infra-five-ubuntu
+    parent: openstack-helm-infra
+    nodeset: openstack-helm-five-node-ubuntu
+
+- job:
+    name: openstack-helm-infra-five-centos
+    parent: openstack-helm-infra
+    nodeset: openstack-helm-five-node-centos
+
+- job:
+    name: openstack-helm-infra-five-fedora
+    parent: openstack-helm-infra
+    nodeset: openstack-helm-five-node-fedora
+
+- job:
+    name: openstack-helm-infra-kubernetes-keystone-auth
+    vars:
+      zuul_osh_relative_path: ../openstack-helm/
+      kubernetes_keystone_auth: true
+    parent: openstack-helm-infra
+    nodeset: openstack-helm-single-node
+    run: playbooks/osh-infra-keystone-k8s-auth.yaml
+    required-projects:
+      - openstack/openstack-helm
